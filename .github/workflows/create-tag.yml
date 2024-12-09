@@ -24,34 +24,40 @@ jobs:
 
         # Default to "test-tag-v0.0.0" if no tag is found
         if [ -z "$latest_tag" ]; then
-          echo "latest_tag=test-tag-v0.0.0" >> $GITHUB_ENV
-        else
-          echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+          latest_tag="test-tag-v0.0.0"
         fi
+
+        echo "latest_tag=$latest_tag" >> $GITHUB_ENV
 
     - name: Calculate Next Version
       id: increment_version
       run: |
-        # Extract the numeric part of the tag
-        latest_version="${{ env.latest_tag#test-tag-v }}"
-        
-        # Break version into components
+        # Access the latest tag from the environment directly in Bash
+        latest_tag=$latest_tag
+
+        # Remove the "test-tag-v" prefix
+        latest_version=${latest_tag#test-tag-v}
+
+        # Split the version into major, minor, and patch components
         IFS='.' read -r major minor patch <<< "$latest_version"
-        
+
         # Increment the patch version
         new_patch=$((patch + 1))
-        
-        # Form the new version
+
+        # Form the new tag version
         next_version="test-tag-v${major}.${minor}.${new_patch}"
-        
+
         echo "next_version=$next_version" >> $GITHUB_ENV
 
     - name: Create and Push New Tag
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # Create the new tag
-        git tag -a "${{ env.next_version }}" -m "Auto-incremented version to ${{ env.next_version }}"
+        # Access the next version from the environment
+        next_version=$next_version
 
-        # Push the tag to the repository
-        git push origin "${{ env.next_version }}"
+        # Create the new tag
+        git tag -a "$next_version" -m "Auto-incremented version to $next_version"
+
+        # Push the tag to the remote repository
+        git push origin "$next_ve
