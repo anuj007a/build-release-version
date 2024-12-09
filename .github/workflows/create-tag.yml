@@ -1,0 +1,57 @@
+name: Auto-Increment Version Tag
+
+on:
+  push:
+    branches:
+      - master  # Trigger on merges to the 'master' branch
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Fetch All Tags
+      run: git fetch --tags
+
+    - name: Get Latest Tag
+      id: get_latest_tag
+      run: |
+        # Get the latest tag matching the pattern "test-tag-v*"
+        latest_tag=$(git tag --list "test-tag-v*" | sort -V | tail -n 1)
+
+        # Default to "test-tag-v0.0.0" if no tag is found
+        if [ -z "$latest_tag" ]; then
+          echo "latest_tag=test-tag-v0.0.0" >> $GITHUB_ENV
+        else
+          echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+        fi
+
+    - name: Calculate Next Version
+      id: increment_version
+      run: |
+        # Extract the numeric part of the tag
+        latest_version=${{ env.latest_tag#test-tag-v }}
+        
+        # Break version into components
+        IFS='.' read -r major minor patch <<< "$latest_version"
+        
+        # Increment the patch version
+        new_patch=$((patch + 1))
+        
+        # Form the new version
+        next_version="test-tag-v${major}.${minor}.${new_patch}"
+        
+        echo "next_version=$next_version" >> $GITHUB_ENV
+
+    - name: Create and Push New Tag
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Create the new tag
+        git tag -a "${{ env.next_version }}" -m "Auto-incremented version to ${{ env.next_version }}"
+
+        # Push the tag to the repository
+        git push origin "${{ env.next_version }}"
