@@ -9,6 +9,9 @@ jobs:
   create-tag:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write  # Explicit permission to write to the repository (push tags)
+    
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v3
