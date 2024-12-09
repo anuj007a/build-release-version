@@ -1,0 +1,53 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'test-tag-v*'  # Trigger when a new tag is created in the format 'test-tag-v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Get Latest Tag
+      id: get_latest_tag
+      run: |
+        # Get the latest tag pushed
+        latest_tag=${GITHUB_REF#refs/tags/}
+        echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+
+    - name: Get Previous Tag
+      id: get_previous_tag
+      run: |
+        # Get all tags and sort them
+        tags=$(git tag --list "test-tag-v*" | sort -V)
+        
+        # Find the previous tag (exclude the latest tag)
+        previous_tag=$(echo "$tags" | grep -B 1 "$latest_tag" | head -n 1)
+        echo "previous_tag=$previous_tag" >> $GITHUB_ENV
+
+    - name: Generate Release Notes
+      id: generate_release_notes
+      run: |
+        # Generate release notes by comparing the latest and previous tags
+        release_notes=$(git log --oneline ${previous_tag}..${latest_tag})
+        echo "release_notes=$release_notes" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${ env.latest_tag }
+        name: "Release ${ env.latest_tag } - $(date +'%d-%m-%Y')"
+        body: |
+          ### Release Notes:
+          ${ env.release_notes }
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
