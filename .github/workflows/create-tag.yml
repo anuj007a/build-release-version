@@ -33,7 +33,7 @@ jobs:
       id: increment_version
       run: |
         # Extract the numeric part of the tag
-        latest_version=${{ env.latest_tag#test-tag-v }}
+        latest_version="${{ env.latest_tag#test-tag-v }}"
         
         # Break version into components
         IFS='.' read -r major minor patch <<< "$latest_version"
