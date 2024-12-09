@@ -49,6 +49,11 @@ jobs:
 
         echo "next_version=$next_version" >> $GITHUB_ENV
 
+    - name: Configure Git User
+      run: |
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "GitHub Actions"
+
     - name: Create and Push New Tag
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,4 +65,4 @@ jobs:
         git tag -a "$next_version" -m "Auto-incremented version to $next_version"
 
         # Push the tag to the remote repository
-        git push origin "$next_ve
+        git push origin "$next_version"
