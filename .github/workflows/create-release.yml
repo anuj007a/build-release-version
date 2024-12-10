@@ -21,28 +21,36 @@ jobs:
       - name: Get Latest Tag
         id: get_latest_tag
         run: |
-          # Extract the tag name from the GITHUB_REF
           latest_tag=${GITHUB_REF#refs/tags/}
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+          echo "Latest tag found: $latest_tag"
+
+      - name: Validate Latest Tag
+        run: |
+          latest_tag=${{ env.latest_tag }}
+          if [ -z "$latest_tag" ]; then
+            echo "Error: No valid latest tag found."
+            exit 1
+          fi
+
+          if ! git tag --list | grep -q "^$latest_tag$"; then
+            echo "Error: Tag $latest_tag does not exist in the repository."
+            exit 1
+          fi
 
       - name: Get Previous Tag
         id: get_previous_tag
         run: |
-          # Get all tags and sort them
           tags=$(git tag --list "test-tag-v*" | sort -V)
-          
-          # Find the previous tag (exclude the latest tag)
           previous_tag=$(echo "$tags" | grep -B 1 "$latest_tag" | head -n 1)
           echo "previous_tag=$previous_tag" >> $GITHUB_ENV
 
       - name: Generate Release Notes
         id: generate_release_notes
         run: |
-          # Ensure the environment variables are properly accessed
           latest_tag=${{ env.latest_tag }}
           previous_tag=${{ env.previous_tag }}
 
-          # Check if both tags exist
           if [[ -z "$previous_tag" ]]; then
             echo "No previous tag found. Generating release notes from the beginning of the repository."
             release_notes=$(git log --oneline "$latest_tag")
@@ -51,13 +59,12 @@ jobs:
           fi
 
           echo "release_notes=$release_notes" >> $GITHUB_ENV
-      
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${ env.latest_tag }
-          name: "Release ${ env.latest_tag } - $(date +'%d-%m-%Y')"
+          tag_name: ${{ env.latest_tag }}
+          name: "Release - ${{ env.latest_tag }} - $(date +'%d-%m-%Y')"
           body: |
             ### Release Notes:
             ${{ env.release_notes }}
