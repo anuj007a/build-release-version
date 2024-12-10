@@ -38,9 +38,20 @@ jobs:
       - name: Generate Release Notes
         id: generate_release_notes
         run: |
-          # Generate release notes by comparing the latest and previous tags
-          release_notes=$(git log --oneline ${ env.previous_tag }..${ env.latest_tag })
+          # Ensure the environment variables are properly accessed
+          latest_tag=${{ env.latest_tag }}
+          previous_tag=${{ env.previous_tag }}
+
+          # Check if both tags exist
+          if [[ -z "$previous_tag" ]]; then
+            echo "No previous tag found. Generating release notes from the beginning of the repository."
+            release_notes=$(git log --oneline "$latest_tag")
+          else
+            release_notes=$(git log --oneline "$previous_tag".."$latest_tag")
+          fi
+
           echo "release_notes=$release_notes" >> $GITHUB_ENV
+      
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
