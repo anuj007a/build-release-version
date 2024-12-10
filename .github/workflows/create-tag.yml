@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write  # Explicit permission to write to the repository (push tags)
-    
+      contents: write  # Permission to push tags
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -31,11 +31,12 @@ jobs:
           fi
           
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+          echo "Latest tag found: $latest_tag"
 
       - name: Calculate Next Version
         id: increment_version
         run: |
-          # Access the latest tag from the environment directly in Bash
+          # Access the latest tag from the environment
           latest_tag=$latest_tag
           
           # Remove the "test-tag-v" prefix
@@ -51,6 +52,7 @@ jobs:
           next_version="test-tag-v${major}.${minor}.${new_patch}"
           
           echo "next_version=$next_version" >> $GITHUB_ENV
+          echo "Next version to be created: $next_version"
 
       - name: Configure Git User
         run: |

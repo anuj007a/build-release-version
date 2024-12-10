@@ -3,26 +3,33 @@ name: Create Release on New Tag
 on:
   workflow_run:
     workflows:
-      - Auto-Increment Version Tag  # Name of the first workflow
+      - Auto-Increment Version Tag  # Exact name of Script 1
     types:
-      - completed  # Trigger only after the first workflow completes
+      - completed  # Trigger after Script 1 completes
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write
+      contents: write  # Permission to create releases
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+
+      - name: List All Tags (Debugging)
+        run: git tag --list "test-tag-v*"
+
+      - name: Fetch All Tags
+        run: git fetch --tags
 
       - name: Get Latest Tag
         id: get_latest_tag
         run: |
           # Get the latest tag matching the pattern "test-tag-v*"
           latest_tag=$(git tag --list "test-tag-v*" | sort -V | tail -n 1)
+
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
           echo "Latest tag found: $latest_tag"
 
@@ -45,6 +52,7 @@ jobs:
           tags=$(git tag --list "test-tag-v*" | sort -V)
           previous_tag=$(echo "$tags" | grep -B 1 "$latest_tag" | head -n 1)
           echo "previous_tag=$previous_tag" >> $GITHUB_ENV
+          echo "Previous tag found: $previous_tag"
 
       - name: Generate Release Notes
         id: generate_release_notes
@@ -60,6 +68,7 @@ jobs:
           fi
 
           echo "release_notes=$release_notes" >> $GITHUB_ENV
+          echo "Release notes generated."
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
