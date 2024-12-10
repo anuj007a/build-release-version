@@ -3,9 +3,9 @@ name: Create Release on New Tag
 on:
   workflow_run:
     workflows:
-      - Auto-Increment Version Tag  # Name of Script 1
+      - Auto-Increment Version Tag  # Name of the first workflow
     types:
-      - completed  # Trigger only after Script 1 completes
+      - completed  # Trigger only after the first workflow completes
 
 jobs:
   create-release:
@@ -13,7 +13,6 @@ jobs:
 
     permissions:
       contents: write
-      id-token: write
 
     steps:
       - name: Checkout Repository
@@ -22,7 +21,7 @@ jobs:
       - name: Get Latest Tag
         id: get_latest_tag
         run: |
-          # Get the latest tag pushed
+          # Extract the tag name from the GITHUB_REF
           latest_tag=${GITHUB_REF#refs/tags/}
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
 
@@ -40,7 +39,7 @@ jobs:
         id: generate_release_notes
         run: |
           # Generate release notes by comparing the latest and previous tags
-          release_notes=$(git log --oneline ${previous_tag}..${latest_tag})
+          release_notes=$(git log --oneline ${ env.previous_tag }..${ env.latest_tag })
           echo "release_notes=$release_notes" >> $GITHUB_ENV
 
       - name: Create GitHub Release
@@ -50,6 +49,6 @@ jobs:
           name: "Release ${ env.latest_tag } - $(date +'%d-%m-%Y')"
           body: |
             ### Release Notes:
-            ${ env.release_notes }
+            ${{ env.release_notes }}
         env:
-          GITHUB_TOKEN: ${ secrets.GITHUB_TOKEN }
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
