@@ -3,33 +3,26 @@ name: Create Release on New Tag
 on:
   workflow_run:
     workflows:
-      - Auto-Increment Version Tag  # Exact name of Script 1
+      - Auto-Increment Version Tag  # Name of the first workflow
     types:
-      - completed  # Trigger after Script 1 completes
+      - completed  # Trigger only after the first workflow completes
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write  # Permission to create releases
+      contents: write
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
-
-      - name: List All Tags (Debugging)
-        run: git tag --list "test-tag-v*"
-
-      - name: Fetch All Tags
-        run: git fetch --tags
 
       - name: Get Latest Tag
         id: get_latest_tag
         run: |
           # Get the latest tag matching the pattern "test-tag-v*"
           latest_tag=$(git tag --list "test-tag-v*" | sort -V | tail -n 1)
-
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
           echo "Latest tag found: $latest_tag"
 
@@ -38,11 +31,6 @@ jobs:
           latest_tag=${{ env.latest_tag }}
           if [ -z "$latest_tag" ]; then
             echo "Error: No valid latest tag found."
-            exit 1
-          fi
-
-          if ! git tag --list | grep -q "^$latest_tag$"; then
-            echo "Error: Tag $latest_tag does not exist in the repository."
             exit 1
           fi
 
@@ -68,13 +56,20 @@ jobs:
           fi
 
           echo "release_notes=$release_notes" >> $GITHUB_ENV
-          echo "Release notes generated."
+
+      - name: Prepare Release Name
+        id: prepare_release_name
+        run: |
+          latest_tag=${{ env.latest_tag }}
+          release_name="Release - $latest_tag - $(date +'%d-%m-%Y')"
+          echo "release_name=$release_name" >> $GITHUB_ENV
+          echo "Release Name: $release_name"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.latest_tag }}
-          name: "Release - ${{ env.latest_tag }} - $(date +'%d-%m-%Y')"
+          name: ${{ env.release_name }}
           body: |
             ### Release Notes:
             ${{ env.release_notes }}
