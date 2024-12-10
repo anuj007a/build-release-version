@@ -13,59 +13,59 @@ jobs:
       contents: write  # Explicit permission to write to the repository (push tags)
     
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    - name: Fetch All Tags
-      run: git fetch --tags
+      - name: Fetch All Tags
+        run: git fetch --tags
 
-    - name: Get Latest Tag
-      id: get_latest_tag
-      run: |
-        # Get the latest tag matching the pattern "test-tag-v*"
-        latest_tag=$(git tag --list "test-tag-v*" | sort -V | tail -n 1)
+      - name: Get Latest Tag
+        id: get_latest_tag
+        run: |
+          # Get the latest tag matching the pattern "test-tag-v*"
+          latest_tag=$(git tag --list "test-tag-v*" | sort -V | tail -n 1)
+          
+          # Default to "test-tag-v0.0.0" if no tag is found
+          if [ -z "$latest_tag" ]; then
+            latest_tag="test-tag-v0.0.0"
+          fi
+          
+          echo "latest_tag=$latest_tag" >> $GITHUB_ENV
 
-        # Default to "test-tag-v0.0.0" if no tag is found
-        if [ -z "$latest_tag" ]; then
-          latest_tag="test-tag-v0.0.0"
-        fi
+      - name: Calculate Next Version
+        id: increment_version
+        run: |
+          # Access the latest tag from the environment directly in Bash
+          latest_tag=$latest_tag
+          
+          # Remove the "test-tag-v" prefix
+          latest_version=${latest_tag#test-tag-v}
+          
+          # Split the version into major, minor, and patch components
+          IFS='.' read -r major minor patch <<< "$latest_version"
+          
+          # Increment the patch version
+          new_patch=$((patch + 1))
+          
+          # Form the new tag version
+          next_version="test-tag-v${major}.${minor}.${new_patch}"
+          
+          echo "next_version=$next_version" >> $GITHUB_ENV
 
-        echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+      - name: Configure Git User
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Actions"
 
-    - name: Calculate Next Version
-      id: increment_version
-      run: |
-        # Access the latest tag from the environment directly in Bash
-        latest_tag=$latest_tag
-
-        # Remove the "test-tag-v" prefix
-        latest_version=${latest_tag#test-tag-v}
-
-        # Split the version into major, minor, and patch components
-        IFS='.' read -r major minor patch <<< "$latest_version"
-
-        # Increment the patch version
-        new_patch=$((patch + 1))
-
-        # Form the new tag version
-        next_version="test-tag-v${major}.${minor}.${new_patch}"
-
-        echo "next_version=$next_version" >> $GITHUB_ENV
-
-    - name: Configure Git User
-      run: |
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git config --global user.name "GitHub Actions"
-
-    - name: Create and Push New Tag
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        # Access the next version from the environment
-        next_version=$next_version
-
-        # Create the new tag
-        git tag -a "$next_version" -m "Auto-incremented version to $next_version"
-
-        # Push the tag to the remote repository
-        git push origin "$next_version"
+      - name: Create and Push New Tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Access the next version from the environment
+          next_version=$next_version
+          
+          # Create the new tag
+          git tag -a "$next_version" -m "Auto-incremented version to $next_version"
+          
+          # Push the tag to the remote repository
+          git push origin "$next_version"
