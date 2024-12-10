@@ -3,26 +3,30 @@ name: Create Release on New Tag
 on:
   workflow_run:
     workflows:
-      - Auto-Increment Version Tag  # Name of the first workflow
+      - Auto-Increment Version Tag  # Exact name of Script 1
     types:
-      - completed  # Trigger only after the first workflow completes
+      - completed  # Trigger after Script 1 completes
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write
+      contents: write  # Permission to create releases
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+
+      - name: Fetch All Tags
+        run: git fetch --tags
 
       - name: Get Latest Tag
         id: get_latest_tag
         run: |
           # Get the latest tag matching the pattern "test-tag-v*"
           latest_tag=$(git tag --list "test-tag-v*" | sort -V | tail -n 1)
+
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
           echo "Latest tag found: $latest_tag"
 
@@ -31,6 +35,11 @@ jobs:
           latest_tag=${{ env.latest_tag }}
           if [ -z "$latest_tag" ]; then
             echo "Error: No valid latest tag found."
+            exit 1
+          fi
+
+          if ! git tag --list | grep -q "^$latest_tag$"; then
+            echo "Error: Tag $latest_tag does not exist in the repository."
             exit 1
           fi
 
