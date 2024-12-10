@@ -56,25 +56,22 @@ jobs:
         run: |
           latest_tag=${{ env.latest_tag }}
           previous_tag=${{ env.previous_tag }}
-
+          
           if [[ -z "$previous_tag" ]]; then
-            # Generate from the beginning if no previous tag
+            # If no previous tag, generate notes from the start
+            release_notes=$(git log --oneline "$latest_tag")
             release_message="Release notes generated from the beginning of the repository to $latest_tag."
-            changelog_url="https://github.com/anuj007a/build-release-version/compare/$latest_tag"
-            release_notes=$(git log --pretty=format:"* %s by @%an in %h" "$latest_tag")
           else
-            # Generate for the range between previous_tag and latest_tag
+            release_notes=$(git log --oneline "$previous_tag".."$latest_tag")
             release_message="Release notes generated from $previous_tag to $latest_tag."
-            changelog_url="https://github.com/anuj007a/build-release-version/compare/$previous_tag...$latest_tag"
-            release_notes=$(git log --pretty=format:"* %s by @%an in %h" "$previous_tag..$latest_tag")
           fi
-
-          # Append full changelog link to the release notes
-          release_notes="$release_notes\n\n**Full Changelog**: $changelog_url"
-
+          
+          if [ -z "$release_notes" ]; then
+            echo "Warning: No commits found for release notes."
+          fi
+          
           echo "release_notes=$release_notes" >> $GITHUB_ENV
           echo "release_message=$release_message" >> $GITHUB_ENV
-
           echo "Generated release notes: $release_notes"
           echo "Release message: $release_message"
 
@@ -94,8 +91,7 @@ jobs:
           body: |
             ### Release Notes:
             ${{ env.release_message }}
-
-            ## What's Changed
+            
             ${{ env.release_notes }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
