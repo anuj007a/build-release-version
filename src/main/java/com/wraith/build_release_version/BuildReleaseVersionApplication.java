@@ -1,4 +1,4 @@
-package com.anuj.build_release_version;
+package com.wraith.build_release_version;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

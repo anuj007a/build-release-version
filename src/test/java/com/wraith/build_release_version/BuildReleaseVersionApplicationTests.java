@@ -1,4 +1,4 @@
-package com.anuj.build_release_version;
+package com.wraith.build_release_version;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
