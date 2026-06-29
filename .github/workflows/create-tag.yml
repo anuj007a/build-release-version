@@ -3,11 +3,17 @@ name: Auto-Increment Version Tag
 on:
   push:
     branches:
-      - master  # Trigger on merges to the 'master' branch
+      - master
+    # Fires on any push to master (direct commits and PR merges).
+    # Auto-release is controlled by AUTO_RELEASE_ON_MERGE repository variable.
+    # Settings → Variables → Actions → set AUTO_RELEASE_ON_MERGE=true to enable. Default: disabled.
 
 jobs:
   create-tag:
     runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && vars.AUTO_RELEASE_ON_MERGE == 'true')
 
     permissions:
       contents: write  # Permission to push tags
