@@ -90,7 +90,27 @@ jobs:
           echo "effective_label=$EFFECTIVE_LABEL"   >> "$GITHUB_OUTPUT"
           echo "new_tag=$NEW_TAG"                   >> "$GITHUB_OUTPUT"
 
-          # ── Step summary ───────────────────────────────────────────────────
+          # ── Release notes header (parameters table + audit) ────────────────
+          # Use heredoc delimiter in GITHUB_OUTPUT for multiline value
+          {
+            echo "release_body<<EOF"
+            echo "## Release Parameters"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Tag | \`$NEW_TAG\` |"
+            echo "| Type | $RELEASE_TYPE |"
+            echo "| Label | $EFFECTIVE_LABEL |"
+            echo "| Triggered by | @${{ github.actor }} |"
+            echo "| Commit | [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/$GITHUB_SHA) |"
+            echo "| Workflow run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "---"
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          # ── Step summary (mirrors the same table) ──────────────────────────
           {
             echo "### Release Parameters"
             echo "| Field | Value |"
@@ -98,7 +118,7 @@ jobs:
             echo "| Tag | \`$NEW_TAG\` |"
             echo "| Type | $RELEASE_TYPE |"
             echo "| Label | $EFFECTIVE_LABEL |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Triggered by | @${{ github.actor }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create and push tag
@@ -133,4 +153,5 @@ jobs:
           name: ${{ steps.params.outputs.new_tag }}
           prerelease: ${{ steps.flags.outputs.prerelease }}
           make_latest: ${{ steps.flags.outputs.make_latest }}
+          body: ${{ steps.params.outputs.release_body }}
           generate_release_notes: true
