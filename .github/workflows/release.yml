@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: 'Release type. Non-main/master branches are capped at minor.'
+        description: 'Release type. Non-main branches are capped at minor.'
         type: choice
         options:
           - minor
@@ -14,7 +14,7 @@ on:
         default: minor
         required: true
       release_label:
-        description: 'Release label (Default: minor→Pre-release, major→Latest, hotfix→None)'
+        description: 'Release label'
         type: choice
         options:
           - None
@@ -22,12 +22,16 @@ on:
           - Latest
         default: Pre-release
         required: true
+      hotfix_base:
+        description: 'Base tag to hotfix, e.g. v1.1.5 — required only when release_type=hotfix'
+        type: string
+        required: false
+        default: ''
   push:
     branches:
       - main
-    # Auto-release on merge is controlled by the AUTO_RELEASE_ON_MERGE repository variable.
-    # Go to Settings → Variables → Actions and set AUTO_RELEASE_ON_MERGE=true to enable.
-    # Default is disabled — the push event fires but the job is skipped when unset or false.
+    # Auto-release on merge is controlled by AUTO_RELEASE_ON_MERGE repository variable.
+    # Settings → Variables → Actions → set AUTO_RELEASE_ON_MERGE=true to enable. Default: disabled.
 
 permissions:
   contents: write
@@ -35,8 +39,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # For push events: only run when AUTO_RELEASE_ON_MERGE repository variable is set to 'true'.
-    # Manual dispatch (workflow_dispatch) always runs regardless of this toggle.
+    # Push events only run when the toggle is enabled; manual dispatch always runs.
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && vars.AUTO_RELEASE_ON_MERGE == 'true')
@@ -52,65 +55,85 @@ jobs:
         run: |
           # ── Determine release type and label ──────────────────────────────
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Auto-triggered on merge to main/master: always major + Latest
             RELEASE_TYPE="major"
             EFFECTIVE_LABEL="Latest"
           else
             RELEASE_TYPE="${{ inputs.release_type }}"
-
-            # Non-main/master branches are capped at minor
             BRANCH="${{ github.ref_name }}"
             if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
               echo "Branch '$BRANCH' is not main/master — overriding release type to minor"
               RELEASE_TYPE="minor"
             fi
-
             EFFECTIVE_LABEL="${{ inputs.release_label }}"
           fi
 
-          # ── Compute next semver tag ────────────────────────────────────────
-          # Sort by version (not lexicographic) to get the true latest tag
-          LATEST_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n1)
-          LATEST_TAG="${LATEST_TAG:-v0.0.0}"
-          echo "Current latest tag: $LATEST_TAG"
-
-          VERSION="${LATEST_TAG#v}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          MAJOR="${MAJOR:-0}"; MINOR="${MINOR:-0}"; PATCH="${PATCH:-0}"
+          # ── Versioning scheme ─────────────────────────────────────────────
+          #
+          #   Major:  vN            e.g. v1 → v2 → v3
+          #   Minor:  vN.S.Q        e.g. v1.1.0 → v1.1.1 → ... → v1.1.99 → v1.2.0
+          #             S = series, Q = sequence (0–99); Q rolls over into S at 100
+          #   Hotfix: vN.S.Q-hf.H  e.g. v1.1.5-hf.1 → v1.1.5-hf.2
+          #             H auto-increments per base tag; does not advance the minor line
 
           case "$RELEASE_TYPE" in
-            major)  MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor)  MINOR=$((MINOR + 1)); PATCH=0          ;;
-            hotfix) PATCH=$((PATCH + 1))                   ;;
+
+            major)
+              LATEST_MAJOR=$(git tag --list 'v[0-9]*' --sort=-version:refname \
+                | grep -E '^v[0-9]+$' | head -n1)
+              N="${LATEST_MAJOR#v}"; N="${N:-0}"
+              NEW_TAG="v$((N + 1))"
+              ;;
+
+            minor)
+              # Determine the active major from the latest vN tag
+              LATEST_MAJOR=$(git tag --list 'v[0-9]*' --sort=-version:refname \
+                | grep -E '^v[0-9]+$' | head -n1)
+              N="${LATEST_MAJOR#v}"; N="${N:-1}"
+
+              # Find latest minor tag for this major (excludes -hf.* suffixes)
+              LATEST_MINOR=$(git tag --list "v${N}.*" --sort=-version:refname \
+                | grep -E "^v${N}\.[0-9]+\.[0-9]+$" | head -n1)
+
+              if [ -z "$LATEST_MINOR" ]; then
+                NEW_TAG="v${N}.1.0"
+              else
+                REST="${LATEST_MINOR#v${N}.}"
+                S=$(echo "$REST" | cut -d. -f1)
+                Q=$(echo "$REST" | cut -d. -f2)
+                Q=$((Q + 1))
+                if [ "$Q" -ge 100 ]; then S=$((S + 1)); Q=0; fi
+                NEW_TAG="v${N}.${S}.${Q}"
+              fi
+              ;;
+
+            hotfix)
+              BASE="${{ inputs.hotfix_base }}"
+              if [ -z "$BASE" ]; then
+                echo "::error::hotfix_base input is required when release_type=hotfix"
+                exit 1
+              fi
+              if ! git tag --list | grep -qxF "$BASE"; then
+                echo "::error::Base tag '$BASE' does not exist in this repository"
+                exit 1
+              fi
+              # Auto-increment the hotfix counter on the base tag
+              LATEST_HF=$(git tag --list "${BASE}-hf.*" --sort=-version:refname | head -n1)
+              if [ -z "$LATEST_HF" ]; then H=1; else H="${LATEST_HF##*-hf.}"; H=$((H + 1)); fi
+              NEW_TAG="${BASE}-hf.${H}"
+              ;;
+
           esac
 
-          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "New tag: $NEW_TAG"
 
-          echo "release_type=$RELEASE_TYPE"        >> "$GITHUB_OUTPUT"
-          echo "effective_label=$EFFECTIVE_LABEL"   >> "$GITHUB_OUTPUT"
-          echo "new_tag=$NEW_TAG"                   >> "$GITHUB_OUTPUT"
+          # Previous tag for changelog range (used by the release notes API)
+          PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n1)
 
-          # ── Release notes header (parameters table + audit) ────────────────
-          # Use heredoc delimiter in GITHUB_OUTPUT for multiline value
-          {
-            echo "release_body<<EOF"
-            echo "## Release Parameters"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Tag | \`$NEW_TAG\` |"
-            echo "| Type | $RELEASE_TYPE |"
-            echo "| Label | $EFFECTIVE_LABEL |"
-            echo "| Triggered by | @${{ github.actor }} |"
-            echo "| Commit | [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/$GITHUB_SHA) |"
-            echo "| Workflow run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
-            echo ""
-            echo "---"
-            echo ""
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          echo "release_type=$RELEASE_TYPE"      >> "$GITHUB_OUTPUT"
+          echo "effective_label=$EFFECTIVE_LABEL" >> "$GITHUB_OUTPUT"
+          echo "new_tag=$NEW_TAG"                 >> "$GITHUB_OUTPUT"
+          echo "prev_tag=$PREV_TAG"               >> "$GITHUB_OUTPUT"
 
-          # ── Step summary (mirrors the same table) ──────────────────────────
           {
             echo "### Release Parameters"
             echo "| Field | Value |"
@@ -128,30 +151,53 @@ jobs:
           git tag "${{ steps.params.outputs.new_tag }}"
           git push origin "${{ steps.params.outputs.new_tag }}"
 
-      - name: Resolve release flags
-        id: flags
-        run: |
-          case "${{ steps.params.outputs.effective_label }}" in
-            "Pre-release")
-              echo "prerelease=true"
-              echo "make_latest=false"
-              ;;
-            "Latest")
-              echo "prerelease=false"
-              echo "make_latest=true"
-              ;;
-            *)
-              echo "prerelease=false"
-              echo "make_latest=false"
-              ;;
-          esac >> "$GITHUB_OUTPUT"
-
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.params.outputs.new_tag }}
-          name: ${{ steps.params.outputs.new_tag }}
-          prerelease: ${{ steps.flags.outputs.prerelease }}
-          make_latest: ${{ steps.flags.outputs.make_latest }}
-          body: ${{ steps.params.outputs.release_body }}
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_TAG: ${{ steps.params.outputs.new_tag }}
+          PREV_TAG: ${{ steps.params.outputs.prev_tag }}
+          EFFECTIVE_LABEL: ${{ steps.params.outputs.effective_label }}
+          RELEASE_TYPE: ${{ steps.params.outputs.release_type }}
+        run: |
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+
+          # ── Fetch auto-generated changelog from GitHub API ────────────────
+          GEN_ARGS=(-f "tag_name=${NEW_TAG}" -f "target_commitish=${{ github.sha }}")
+          [ -n "$PREV_TAG" ] && GEN_ARGS+=(-f "previous_tag_name=${PREV_TAG}")
+          GENERATED_NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
+            --method POST "${GEN_ARGS[@]}" --jq '.body' 2>/dev/null || echo "")
+
+          # ── Write combined release notes ──────────────────────────────────
+          {
+            echo "## Release Parameters"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Tag | \`${NEW_TAG}\` |"
+            echo "| Type | ${RELEASE_TYPE} |"
+            echo "| Label | ${EFFECTIVE_LABEL} |"
+            echo "| Triggered by | @${{ github.actor }} |"
+            echo "| Commit | [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
+            echo "| Workflow run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "---"
+            echo ""
+            printf '%s' "$GENERATED_NOTES"
+          } > /tmp/release_notes.md
+
+          # ── Resolve label flags ───────────────────────────────────────────
+          case "$EFFECTIVE_LABEL" in
+            "Pre-release") IS_PRERELEASE=true;  MAKE_LATEST=false ;;
+            "Latest")      IS_PRERELEASE=false; MAKE_LATEST=true  ;;
+            *)             IS_PRERELEASE=false; MAKE_LATEST=false ;;
+          esac
+
+          # ── Create the release via gh API (no third-party action needed) ──
+          gh api repos/${{ github.repository }}/releases \
+            --method POST \
+            -f  tag_name="${NEW_TAG}" \
+            -f  name="${NEW_TAG}" \
+            -f  body="$(cat /tmp/release_notes.md)" \
+            -F  prerelease="${IS_PRERELEASE}" \
+            -f  make_latest="${MAKE_LATEST}"
