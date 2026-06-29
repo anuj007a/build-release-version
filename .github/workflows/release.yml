@@ -25,6 +25,9 @@ on:
   push:
     branches:
       - main
+    # Auto-release on merge is controlled by the AUTO_RELEASE_ON_MERGE repository variable.
+    # Go to Settings → Variables → Actions and set AUTO_RELEASE_ON_MERGE=true to enable.
+    # Default is disabled — the push event fires but the job is skipped when unset or false.
 
 permissions:
   contents: write
@@ -32,6 +35,11 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # For push events: only run when AUTO_RELEASE_ON_MERGE repository variable is set to 'true'.
+    # Manual dispatch (workflow_dispatch) always runs regardless of this toggle.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && vars.AUTO_RELEASE_ON_MERGE == 'true')
 
     steps:
       - name: Checkout
@@ -57,17 +65,7 @@ jobs:
               RELEASE_TYPE="minor"
             fi
 
-            # Resolve effective label from user input or per-type default
-            INPUT_LABEL="${{ inputs.release_label }}"
-            if [ "$INPUT_LABEL" = "Default" ]; then
-              case "$RELEASE_TYPE" in
-                major)  EFFECTIVE_LABEL="Latest"      ;;
-                minor)  EFFECTIVE_LABEL="Pre-release" ;;
-                hotfix) EFFECTIVE_LABEL="None"        ;;
-              esac
-            else
-              EFFECTIVE_LABEL="$INPUT_LABEL"
-            fi
+            EFFECTIVE_LABEL="${{ inputs.release_label }}"
           fi
 
           # ── Compute next semver tag ────────────────────────────────────────
