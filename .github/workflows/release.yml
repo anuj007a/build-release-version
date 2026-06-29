@@ -69,32 +69,37 @@ jobs:
 
           # ── Versioning scheme ─────────────────────────────────────────────
           #
-          #   Major:  vN            e.g. v1 → v2 → v3
-          #   Minor:  vN.S.Q        e.g. v1.1.0 → v1.1.1 → ... → v1.1.99 → v1.2.0
-          #             S = series, Q = sequence (0–99); Q rolls over into S at 100
-          #   Hotfix: vN.S.Q-hf.H  e.g. v1.1.5-hf.1 → v1.1.5-hf.2
+          #   Major:  vN.0.0        e.g. v1.0.0 → v2.0.0 → v3.0.0
+          #   Minor:  vN.S.Q        e.g. v1.1.0 → v1.1.1 → v1.1.99 → v1.2.0
+          #             S = series, Q = sequence (0–99); Q rolls at 100 → S++, Q=0
+          #             After a new major (v2.0.0) minor always restarts at v2.1.0
+          #   Hotfix: vN.S.Q-H      e.g. v1.1.5-1 → v1.1.5-2
           #             H auto-increments per base tag; does not advance the minor line
 
           case "$RELEASE_TYPE" in
 
             major)
-              LATEST_MAJOR=$(git tag --list 'v[0-9]*' --sort=-version:refname \
-                | grep -E '^v[0-9]+$' | head -n1)
-              N="${LATEST_MAJOR#v}"; N="${N:-0}"
-              NEW_TAG="v$((N + 1))"
+              # Find the highest major number from all vN.M.P tags
+              LATEST=$(git tag --list 'v[0-9]*' --sort=-version:refname \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+              LATEST="${LATEST:-v0.0.0}"
+              N="${LATEST#v}"; N="${N%%.*}"
+              NEW_TAG="v$((N + 1)).0.0"
               ;;
 
             minor)
-              # Determine the active major from the latest vN tag
+              # Current major = latest vN.0.0 tag (the most recent major release)
               LATEST_MAJOR=$(git tag --list 'v[0-9]*' --sort=-version:refname \
-                | grep -E '^v[0-9]+$' | head -n1)
-              N="${LATEST_MAJOR#v}"; N="${N:-1}"
+                | grep -E '^v[0-9]+\.0\.0$' | head -n1)
+              LATEST_MAJOR="${LATEST_MAJOR:-v1.0.0}"
+              N="${LATEST_MAJOR#v}"; N="${N%%.*}"
 
-              # Find latest minor tag for this major (excludes -hf.* suffixes)
+              # Latest minor tag scoped to this major only (excludes hotfix suffixes)
               LATEST_MINOR=$(git tag --list "v${N}.*" --sort=-version:refname \
                 | grep -E "^v${N}\.[0-9]+\.[0-9]+$" | head -n1)
 
-              if [ -z "$LATEST_MINOR" ]; then
+              # v{N}.0.0 is the major release itself — first minor starts at v{N}.1.0
+              if [ -z "$LATEST_MINOR" ] || [ "$LATEST_MINOR" = "v${N}.0.0" ]; then
                 NEW_TAG="v${N}.1.0"
               else
                 REST="${LATEST_MINOR#v${N}.}"
@@ -116,10 +121,12 @@ jobs:
                 echo "::error::Base tag '$BASE' does not exist in this repository"
                 exit 1
               fi
-              # Auto-increment the hotfix counter on the base tag
-              LATEST_HF=$(git tag --list "${BASE}-hf.*" --sort=-version:refname | head -n1)
-              if [ -z "$LATEST_HF" ]; then H=1; else H="${LATEST_HF##*-hf.}"; H=$((H + 1)); fi
-              NEW_TAG="${BASE}-hf.${H}"
+              # Find the highest existing hotfix number for this base tag
+              # Tags follow pattern: {BASE}-{N}  e.g. v1.1.5-1, v1.1.5-2
+              LATEST_HF_NUM=$(git tag --list "${BASE}-*" \
+                | grep -oE '[0-9]+$' | sort -n | tail -n1)
+              H="${LATEST_HF_NUM:-0}"; H=$((H + 1))
+              NEW_TAG="${BASE}-${H}"
               ;;
 
           esac
