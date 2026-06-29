@@ -35,7 +35,8 @@ on:
   push:
     branches:
       - main
-    # Auto-release on merge is controlled by AUTO_RELEASE_ON_MERGE repository variable.
+    # Fires on any push to main (direct commits and PR merges).
+    # Auto-release is controlled by AUTO_RELEASE_ON_MERGE repository variable.
     # Settings → Variables → Actions → set AUTO_RELEASE_ON_MERGE=true to enable. Default: disabled.
 
 permissions:
@@ -51,9 +52,11 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" .
+          git fetch --tags --force
 
       - name: Compute release parameters
         id: params
@@ -82,7 +85,6 @@ jobs:
           #             H auto-increments per base tag; does not advance the minor line
 
           # ── Optional override: start from a specific tag ──────────────────
-          # When start_from_tag is set, skip git discovery and use it as the base.
           START_FROM="${{ inputs.start_from_tag }}"
           if [ -n "$START_FROM" ]; then
             if ! echo "$START_FROM" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -98,7 +100,6 @@ jobs:
               if [ -n "$START_FROM" ]; then
                 BASE_TAG="$START_FROM"
               else
-                # Find the highest major number from all vN.M.P tags
                 BASE_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname \
                   | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
                 BASE_TAG="${BASE_TAG:-v0.0.0}"
@@ -109,13 +110,11 @@ jobs:
 
             minor)
               if [ -n "$START_FROM" ]; then
-                # Treat start_from_tag as the exact current version to increment from
                 N="${START_FROM#v}"; N="${N%%.*}"
                 REST="${START_FROM#v${N}.}"
                 S=$(echo "$REST" | cut -d. -f1)
                 Q=$(echo "$REST" | cut -d. -f2)
                 if [ "$START_FROM" = "v${N}.0.0" ]; then
-                  # It's a major base — first minor starts at v{N}.1.0
                   NEW_TAG="v${N}.1.0"
                 else
                   Q=$((Q + 1))
@@ -123,17 +122,14 @@ jobs:
                   NEW_TAG="v${N}.${S}.${Q}"
                 fi
               else
-                # Current major = latest vN.0.0 tag (the most recent major release)
                 LATEST_MAJOR=$(git tag --list 'v[0-9]*' --sort=-version:refname \
                   | grep -E '^v[0-9]+\.0\.0$' | head -n1)
                 LATEST_MAJOR="${LATEST_MAJOR:-v1.0.0}"
                 N="${LATEST_MAJOR#v}"; N="${N%%.*}"
 
-                # Latest minor tag scoped to this major only (excludes hotfix suffixes)
                 LATEST_MINOR=$(git tag --list "v${N}.*" --sort=-version:refname \
                   | grep -E "^v${N}\.[0-9]+\.[0-9]+$" | head -n1)
 
-                # v{N}.0.0 is the major release itself — first minor starts at v{N}.1.0
                 if [ -z "$LATEST_MINOR" ] || [ "$LATEST_MINOR" = "v${N}.0.0" ]; then
                   NEW_TAG="v${N}.1.0"
                 else
@@ -157,8 +153,6 @@ jobs:
                 echo "::error::Base tag '$BASE' does not exist in this repository"
                 exit 1
               fi
-              # Find the highest existing hotfix number for this base tag
-              # Tags follow pattern: {BASE}-{N}  e.g. v1.1.5-1, v1.1.5-2
               LATEST_HF_NUM=$(git tag --list "${BASE}-*" \
                 | grep -oE '[0-9]+$' | sort -n | tail -n1)
               H="${LATEST_HF_NUM:-0}"; H=$((H + 1))
@@ -169,7 +163,6 @@ jobs:
 
           echo "New tag: $NEW_TAG"
 
-          # Previous tag for changelog range (used by the release notes API)
           PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n1)
 
           echo "release_type=$RELEASE_TYPE"      >> "$GITHUB_OUTPUT"
@@ -205,7 +198,7 @@ jobs:
           SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${SHORT_SHA:0:7}"
 
-          # ── Fetch auto-generated changelog from GitHub API ────────────────
+          # ── Fetch auto-generated changelog ────────────────────────────────
           GEN_ARGS=(-f "tag_name=${NEW_TAG}" -f "target_commitish=${{ github.sha }}")
           [ -n "$PREV_TAG" ] && GEN_ARGS+=(-f "previous_tag_name=${PREV_TAG}")
           GENERATED_NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
@@ -236,11 +229,13 @@ jobs:
             *)             IS_PRERELEASE=false; MAKE_LATEST=false ;;
           esac
 
-          # ── Create the release via gh API (no third-party action needed) ──
+          # ── Create the release ────────────────────────────────────────────
+          # -f sends typed values (bool inference) — correct for prerelease (boolean field)
+          # -F sends raw strings — correct for make_latest (string enum: "true"/"false"/"legacy")
           gh api repos/${{ github.repository }}/releases \
             --method POST \
-            -f  tag_name="${NEW_TAG}" \
-            -f  name="${NEW_TAG}" \
-            -f  body="$(cat /tmp/release_notes.md)" \
-            -F  prerelease="${IS_PRERELEASE}" \
-            -f  make_latest="${MAKE_LATEST}"
+            -F tag_name="${NEW_TAG}" \
+            -F name="${NEW_TAG}" \
+            -F body="$(cat /tmp/release_notes.md)" \
+            -f prerelease="${IS_PRERELEASE}" \
+            -F make_latest="${MAKE_LATEST}"
