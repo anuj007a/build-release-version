@@ -27,6 +27,11 @@ on:
         type: string
         required: false
         default: ''
+      start_from_tag:
+        description: 'Override auto-detection and compute the next tag from this base, e.g. v2.3.0'
+        type: string
+        required: false
+        default: ''
   push:
     branches:
       - main
@@ -76,38 +81,69 @@ jobs:
           #   Hotfix: vN.S.Q-H      e.g. v1.1.5-1 → v1.1.5-2
           #             H auto-increments per base tag; does not advance the minor line
 
+          # ── Optional override: start from a specific tag ──────────────────
+          # When start_from_tag is set, skip git discovery and use it as the base.
+          START_FROM="${{ inputs.start_from_tag }}"
+          if [ -n "$START_FROM" ]; then
+            if ! echo "$START_FROM" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::start_from_tag must be in vN.M.P format, got: $START_FROM"
+              exit 1
+            fi
+            echo "Using start_from_tag override: $START_FROM"
+          fi
+
           case "$RELEASE_TYPE" in
 
             major)
-              # Find the highest major number from all vN.M.P tags
-              LATEST=$(git tag --list 'v[0-9]*' --sort=-version:refname \
-                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
-              LATEST="${LATEST:-v0.0.0}"
-              N="${LATEST#v}"; N="${N%%.*}"
+              if [ -n "$START_FROM" ]; then
+                BASE_TAG="$START_FROM"
+              else
+                # Find the highest major number from all vN.M.P tags
+                BASE_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname \
+                  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+                BASE_TAG="${BASE_TAG:-v0.0.0}"
+              fi
+              N="${BASE_TAG#v}"; N="${N%%.*}"
               NEW_TAG="v$((N + 1)).0.0"
               ;;
 
             minor)
-              # Current major = latest vN.0.0 tag (the most recent major release)
-              LATEST_MAJOR=$(git tag --list 'v[0-9]*' --sort=-version:refname \
-                | grep -E '^v[0-9]+\.0\.0$' | head -n1)
-              LATEST_MAJOR="${LATEST_MAJOR:-v1.0.0}"
-              N="${LATEST_MAJOR#v}"; N="${N%%.*}"
-
-              # Latest minor tag scoped to this major only (excludes hotfix suffixes)
-              LATEST_MINOR=$(git tag --list "v${N}.*" --sort=-version:refname \
-                | grep -E "^v${N}\.[0-9]+\.[0-9]+$" | head -n1)
-
-              # v{N}.0.0 is the major release itself — first minor starts at v{N}.1.0
-              if [ -z "$LATEST_MINOR" ] || [ "$LATEST_MINOR" = "v${N}.0.0" ]; then
-                NEW_TAG="v${N}.1.0"
-              else
-                REST="${LATEST_MINOR#v${N}.}"
+              if [ -n "$START_FROM" ]; then
+                # Treat start_from_tag as the exact current version to increment from
+                N="${START_FROM#v}"; N="${N%%.*}"
+                REST="${START_FROM#v${N}.}"
                 S=$(echo "$REST" | cut -d. -f1)
                 Q=$(echo "$REST" | cut -d. -f2)
-                Q=$((Q + 1))
-                if [ "$Q" -ge 100 ]; then S=$((S + 1)); Q=0; fi
-                NEW_TAG="v${N}.${S}.${Q}"
+                if [ "$START_FROM" = "v${N}.0.0" ]; then
+                  # It's a major base — first minor starts at v{N}.1.0
+                  NEW_TAG="v${N}.1.0"
+                else
+                  Q=$((Q + 1))
+                  if [ "$Q" -ge 100 ]; then S=$((S + 1)); Q=0; fi
+                  NEW_TAG="v${N}.${S}.${Q}"
+                fi
+              else
+                # Current major = latest vN.0.0 tag (the most recent major release)
+                LATEST_MAJOR=$(git tag --list 'v[0-9]*' --sort=-version:refname \
+                  | grep -E '^v[0-9]+\.0\.0$' | head -n1)
+                LATEST_MAJOR="${LATEST_MAJOR:-v1.0.0}"
+                N="${LATEST_MAJOR#v}"; N="${N%%.*}"
+
+                # Latest minor tag scoped to this major only (excludes hotfix suffixes)
+                LATEST_MINOR=$(git tag --list "v${N}.*" --sort=-version:refname \
+                  | grep -E "^v${N}\.[0-9]+\.[0-9]+$" | head -n1)
+
+                # v{N}.0.0 is the major release itself — first minor starts at v{N}.1.0
+                if [ -z "$LATEST_MINOR" ] || [ "$LATEST_MINOR" = "v${N}.0.0" ]; then
+                  NEW_TAG="v${N}.1.0"
+                else
+                  REST="${LATEST_MINOR#v${N}.}"
+                  S=$(echo "$REST" | cut -d. -f1)
+                  Q=$(echo "$REST" | cut -d. -f2)
+                  Q=$((Q + 1))
+                  if [ "$Q" -ge 100 ]; then S=$((S + 1)); Q=0; fi
+                  NEW_TAG="v${N}.${S}.${Q}"
+                fi
               fi
               ;;
 
