@@ -1,0 +1,138 @@
+name: create-release
+run-name: "Release ${{ inputs.release_type || 'major' }} by @${{ github.actor }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type. Non-main/master branches are capped at minor.'
+        type: choice
+        options:
+          - minor
+          - major
+          - hotfix
+        default: minor
+        required: true
+      release_label:
+        description: 'Release label (Default: minor→Pre-release, major→Latest, hotfix→None)'
+        type: choice
+        options:
+          - None
+          - Pre-release
+          - Latest
+        default: Pre-release
+        required: true
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute release parameters
+        id: params
+        run: |
+          # ── Determine release type and label ──────────────────────────────
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Auto-triggered on merge to main/master: always major + Latest
+            RELEASE_TYPE="major"
+            EFFECTIVE_LABEL="Latest"
+          else
+            RELEASE_TYPE="${{ inputs.release_type }}"
+
+            # Non-main/master branches are capped at minor
+            BRANCH="${{ github.ref_name }}"
+            if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
+              echo "Branch '$BRANCH' is not main/master — overriding release type to minor"
+              RELEASE_TYPE="minor"
+            fi
+
+            # Resolve effective label from user input or per-type default
+            INPUT_LABEL="${{ inputs.release_label }}"
+            if [ "$INPUT_LABEL" = "Default" ]; then
+              case "$RELEASE_TYPE" in
+                major)  EFFECTIVE_LABEL="Latest"      ;;
+                minor)  EFFECTIVE_LABEL="Pre-release" ;;
+                hotfix) EFFECTIVE_LABEL="None"        ;;
+              esac
+            else
+              EFFECTIVE_LABEL="$INPUT_LABEL"
+            fi
+          fi
+
+          # ── Compute next semver tag ────────────────────────────────────────
+          # Sort by version (not lexicographic) to get the true latest tag
+          LATEST_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n1)
+          LATEST_TAG="${LATEST_TAG:-v0.0.0}"
+          echo "Current latest tag: $LATEST_TAG"
+
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MAJOR="${MAJOR:-0}"; MINOR="${MINOR:-0}"; PATCH="${PATCH:-0}"
+
+          case "$RELEASE_TYPE" in
+            major)  MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor)  MINOR=$((MINOR + 1)); PATCH=0          ;;
+            hotfix) PATCH=$((PATCH + 1))                   ;;
+          esac
+
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+
+          echo "release_type=$RELEASE_TYPE"        >> "$GITHUB_OUTPUT"
+          echo "effective_label=$EFFECTIVE_LABEL"   >> "$GITHUB_OUTPUT"
+          echo "new_tag=$NEW_TAG"                   >> "$GITHUB_OUTPUT"
+
+          # ── Step summary ───────────────────────────────────────────────────
+          {
+            echo "### Release Parameters"
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Tag | \`$NEW_TAG\` |"
+            echo "| Type | $RELEASE_TYPE |"
+            echo "| Label | $EFFECTIVE_LABEL |"
+            echo "| Triggered by | ${{ github.actor }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.params.outputs.new_tag }}"
+          git push origin "${{ steps.params.outputs.new_tag }}"
+
+      - name: Resolve release flags
+        id: flags
+        run: |
+          case "${{ steps.params.outputs.effective_label }}" in
+            "Pre-release")
+              echo "prerelease=true"
+              echo "make_latest=false"
+              ;;
+            "Latest")
+              echo "prerelease=false"
+              echo "make_latest=true"
+              ;;
+            *)
+              echo "prerelease=false"
+              echo "make_latest=false"
+              ;;
+          esac >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.params.outputs.new_tag }}
+          name: ${{ steps.params.outputs.new_tag }}
+          prerelease: ${{ steps.flags.outputs.prerelease }}
+          make_latest: ${{ steps.flags.outputs.make_latest }}
+          generate_release_notes: true
